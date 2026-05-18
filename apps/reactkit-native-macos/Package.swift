@@ -3,12 +3,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "ReactKit",
+    name: "ReactNativeKit",
     platforms: [
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "ReactKit", targets: ["reactkit"])
+        .executable(name: "ReactNativeKit", targets: ["reactkit"])
     ],
     targets: [
         .executableTarget(

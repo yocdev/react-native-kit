@@ -3,7 +3,7 @@ import Foundation
 import SwiftUI
 
 @main
-struct ReactKitApp: App {
+struct ReactNativeKitApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
 
@@ -30,7 +30,7 @@ struct ReactKitApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        ProcessInfo.processInfo.setValue("ReactKit", forKey: "processName")
+        ProcessInfo.processInfo.setValue("ReactNativeKit", forKey: "processName")
         NSApp.applicationIconImage = loadDockIcon() ?? makeFallbackDockIcon()
         NSApp.activate(ignoringOtherApps: true)
 
@@ -45,6 +45,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func loadDockIcon() -> NSImage? {
         let fileManager = FileManager.default
+        if let bundledIconURL = Bundle.main.url(forResource: "ReactKit", withExtension: "icns"),
+           let image = NSImage(contentsOf: bundledIconURL) {
+            return image
+        }
+
         let current = URL(fileURLWithPath: fileManager.currentDirectoryPath)
         let candidates = [
             current,
@@ -465,8 +470,9 @@ final class AndroidReverseManager: @unchecked Sendable {
         }
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["adb", "track-devices"]
+        let adb = resolveADB()
+        process.executableURL = adb.executableURL
+        process.arguments = adb.arguments + ["track-devices"]
 
         let outputPipe = Pipe()
         let errorPipe = Pipe()
@@ -589,8 +595,9 @@ final class AndroidReverseManager: @unchecked Sendable {
 
     private func runADB(_ arguments: [String]) -> (exitCode: Int32, output: String, message: String) {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["adb"] + arguments
+        let adb = resolveADB()
+        process.executableURL = adb.executableURL
+        process.arguments = adb.arguments + arguments
 
         let outputPipe = Pipe()
         let errorPipe = Pipe()
@@ -612,6 +619,40 @@ final class AndroidReverseManager: @unchecked Sendable {
             .joined(separator: " ")
 
         return (process.terminationStatus, output, message)
+    }
+
+    private func resolveADB() -> (executableURL: URL, arguments: [String]) {
+        let fileManager = FileManager.default
+        let environment = ProcessInfo.processInfo.environment
+        let homeDirectory = fileManager.homeDirectoryForCurrentUser
+        var candidates: [URL] = []
+
+        for key in ["ANDROID_HOME", "ANDROID_SDK_ROOT"] {
+            if let root = environment[key], !root.isEmpty {
+                candidates.append(
+                    URL(fileURLWithPath: root)
+                        .appending(path: "platform-tools")
+                        .appending(path: "adb")
+                )
+            }
+        }
+
+        candidates.append(
+            homeDirectory
+                .appending(path: "Library")
+                .appending(path: "Android")
+                .appending(path: "sdk")
+                .appending(path: "platform-tools")
+                .appending(path: "adb")
+        )
+        candidates.append(URL(fileURLWithPath: "/opt/homebrew/bin/adb"))
+        candidates.append(URL(fileURLWithPath: "/usr/local/bin/adb"))
+
+        for candidate in candidates where fileManager.isExecutableFile(atPath: candidate.path) {
+            return (candidate, [])
+        }
+
+        return (URL(fileURLWithPath: "/usr/bin/env"), ["adb"])
     }
 
     private func emit(
@@ -825,8 +866,9 @@ final class BackendSupervisor {
         }
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["node", scriptURL.path]
+        let runtime = resolveRuntime()
+        process.executableURL = runtime.executableURL
+        process.arguments = runtime.arguments + [scriptURL.path]
         process.currentDirectoryURL = rootURL
         process.environment = ProcessInfo.processInfo.environment
         process.standardOutput = Pipe()
@@ -848,10 +890,40 @@ final class BackendSupervisor {
         self.process = nil
     }
 
+    private func resolveRuntime() -> (executableURL: URL, arguments: [String]) {
+        if let resourceURL = Bundle.main.resourceURL {
+            let bundledBunURL = Bundle.main.bundleURL
+                .appending(path: "Contents")
+                .appending(path: "MacOS")
+                .appending(path: "bun")
+            if FileManager.default.isExecutableFile(atPath: bundledBunURL.path) {
+                return (bundledBunURL, [])
+            }
+
+            let resourceBunURL = resourceURL.appending(path: "bun")
+            if FileManager.default.isExecutableFile(atPath: resourceBunURL.path) {
+                return (resourceBunURL, [])
+            }
+        }
+
+        return (URL(fileURLWithPath: "/usr/bin/env"), ["bun"])
+    }
+
     private func resolveRootURL() -> URL {
         let fileManager = FileManager.default
         if let envRoot = ProcessInfo.processInfo.environment["REACTKIT_ROOT"] {
             return URL(fileURLWithPath: envRoot)
+        }
+
+        if let resourceURL = Bundle.main.resourceURL {
+            let bundledBackend = resourceURL
+                .appending(path: "apps")
+                .appending(path: "reactkit-native-backend")
+                .appending(path: "src")
+                .appending(path: "index.js")
+            if fileManager.fileExists(atPath: bundledBackend.path) {
+                return resourceURL
+            }
         }
 
         let current = URL(fileURLWithPath: fileManager.currentDirectoryPath)
@@ -985,7 +1057,7 @@ struct HeaderView: View {
 
     var body: some View {
         HStack(spacing: 18) {
-            Text("ReactKit")
+            Text("ReactNativeKit")
                 .font(.system(size: 22, weight: .semibold))
                 .lineLimit(1)
             .frame(minWidth: 190, alignment: .leading)
@@ -1257,7 +1329,7 @@ struct EmptyConnectionCard: View {
                     .minimumScaleFactor(0.82)
             }
 
-            Text("Run your app with ReactKit enabled.")
+            Text("Run your app with ReactNativeKit enabled.")
                 .font(.system(size: 13))
                 .foregroundStyle(DesignColor.secondary)
                 .lineSpacing(3)

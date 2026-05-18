@@ -1,11 +1,12 @@
 {
-  "name": "reactkit",
+  "name": "react-native-kit",
   "private": true,
   "scripts": {
     "setup": "corepack enable && cd packages/reactotron && yarn install && yarn build",
-    "start": "cd apps/reactkit-native-macos && swift run ReactKit",
+    "start": "cd apps/reactkit-native-macos && swift run ReactNativeKit",
     "build": "npm run build:reactotron && npm run build:macos",
     "build:reactotron": "cd packages/reactotron && yarn build",
-    "build:macos": "cd apps/reactkit-native-macos && swift build"
+    "build:macos": "cd apps/reactkit-native-macos && swift build",
+    "package:macos": "scripts/package-macos.sh"
   }
 }

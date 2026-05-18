@@ -6,6 +6,7 @@ apps/reactkit-native-macos/.build/
 
 # Local dependencies and generated artifacts
 node_modules/
+dist/
 packages/reactotron/**/node_modules/
 packages/reactotron/**/dist/
 packages/reactotron/.yarn/cache/
