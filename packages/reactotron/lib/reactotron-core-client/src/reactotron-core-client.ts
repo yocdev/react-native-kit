@@ -174,6 +174,11 @@ export class ReactotronImpl
   socket: WebSocket = null as never
 
   /**
+   * Pending reconnect timer.
+   */
+  reconnectTimer: ReturnType<typeof setTimeout> | null = null
+
+  /**
    * Available plugins.
    */
   plugins: Plugin<this>[] = []
@@ -222,6 +227,7 @@ export class ReactotronImpl
         createSocket: null as never,
         host: "localhost",
         port: 9090,
+        reconnectInterval: 2000,
         name: "reactotron-core-client",
         secure: false,
         plugins: corePlugins,
@@ -247,7 +253,29 @@ export class ReactotronImpl
 
   close() {
     this.connected = false
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
     this.socket && this.socket.close && this.socket.close()
+  }
+
+  private scheduleReconnect() {
+    const reconnectInterval = this.options.reconnectInterval ?? 2000
+    if (!this.connected || reconnectInterval <= 0 || this.reconnectTimer) {
+      return
+    }
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      if (this.connected) {
+        this.connect()
+      }
+    }, reconnectInterval)
+
+    if (typeof this.reconnectTimer === "object" && "unref" in this.reconnectTimer) {
+      this.reconnectTimer.unref()
+    }
   }
 
   /**
@@ -269,10 +297,23 @@ export class ReactotronImpl
 
     // establish a connection to the server
     const protocol = secure ? "wss" : "ws"
-    const socket = createSocket!(`${protocol}://${host}:${port}`)
+    let socket: ReturnType<NonNullable<typeof createSocket>>
+    try {
+      socket = createSocket!(`${protocol}://${host}:${port}`) as ReturnType<
+        NonNullable<typeof createSocket>
+      >
+    } catch {
+      this.scheduleReconnect()
+      return this
+    }
 
     // fires when we talk to the server
     const onOpen = () => {
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer)
+        this.reconnectTimer = null
+      }
+
       // fire our optional onConnect handler
       onConnect && onConnect()
 
@@ -309,6 +350,12 @@ export class ReactotronImpl
 
       // as well as the plugin's onDisconnect
       this.plugins.forEach((p) => p.onDisconnect && p.onDisconnect())
+
+      this.scheduleReconnect()
+    }
+
+    const onError = () => {
+      this.scheduleReconnect()
     }
 
     const decodeCommandData = (data: unknown) => {
@@ -355,6 +402,7 @@ export class ReactotronImpl
       const nodeWebSocket = socket as WebSocket
       nodeWebSocket.on("open", onOpen)
       nodeWebSocket.on("close", onClose)
+      nodeWebSocket.on("error", onError)
       nodeWebSocket.on("message", onMessage)
       // assign the socket to the instance
       this.socket = socket
@@ -363,6 +411,7 @@ export class ReactotronImpl
       const browserWebSocket = socket as WebSocket
       socket.onopen = onOpen
       socket.onclose = onClose
+      socket.onerror = onError
       socket.onmessage = (evt) => onMessage(evt.data)
       // assign the socket to the instance
       this.socket = browserWebSocket

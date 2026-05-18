@@ -13,7 +13,7 @@ const config = {
   serverPort: readPort("REACTOTRON_SERVER_PORT", 9091),
   apiPort: readPort("REACTOTRON_NATIVE_API_PORT", 3901),
   mcpPort: readPort("REACTOTRON_MCP_PORT", 4567),
-  bufferLimit: readPositiveInt("REACTOTRON_BUFFER_LIMIT", 500),
+  bufferLimit: readPositiveInt("REACTOTRON_BUFFER_LIMIT", 2000),
 }
 
 const state = {
@@ -49,13 +49,18 @@ function normalizeConnection(connection, connected) {
     clientId: connection.clientId,
     name: connection.name || previous.name || "React Native App",
     platform: connection.platform || previous.platform || "unknown",
-    platformVersion: connection.platformVersion || previous.platformVersion || null,
-    osRelease: connection.osRelease || previous.osRelease || null,
-    userAgent: connection.userAgent || previous.userAgent || null,
-    address: connection.address || previous.address || null,
+    platformVersion: optionalString(connection.platformVersion ?? previous.platformVersion),
+    osRelease: optionalString(connection.osRelease ?? previous.osRelease),
+    userAgent: optionalString(connection.userAgent ?? previous.userAgent),
+    address: optionalString(connection.address ?? previous.address),
     connected,
     lastSeenAt: new Date().toISOString(),
   }
+}
+
+function optionalString(value) {
+  if (value == null || value === "") return null
+  return String(value)
 }
 
 function normalizeTargetPart(value) {
@@ -252,7 +257,7 @@ function statusPayload() {
 function filterLogs(url) {
   const clientId = url.searchParams.get("clientId")
   const search = (url.searchParams.get("search") || "").trim().toLowerCase()
-  const limit = Math.min(readPositiveIntFromString(url.searchParams.get("limit"), 200), 1000)
+  const limit = Math.min(readPositiveIntFromString(url.searchParams.get("limit"), 200), 500)
 
   return state.commands
     .filter((command) => !clientId || command.clientId === clientId)

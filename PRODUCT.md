@@ -1,10 +1,6 @@
 # Product
 
-## Register
-
-product
-
-## Users
+## User
 
 React Native developers and AI coding agents working together on runtime debugging. The human user needs a fast macOS desktop surface for seeing app connection state, recent logs, search results, and MCP availability while an agent reads the same runtime context through MCP.
 

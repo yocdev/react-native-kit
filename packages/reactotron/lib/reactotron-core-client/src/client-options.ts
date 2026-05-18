@@ -26,6 +26,12 @@ export interface ClientOptions<Client> extends Omit<LifeCycleMethods, "onCommand
   port?: number | null
 
   /**
+   * How long to wait before reconnecting after the socket closes or fails.
+   * Set to 0 to disable reconnects. Default: 2000.
+   */
+  reconnectInterval?: number | null
+
+  /**
    * The name of this client. Usually the app name.
    */
   name?: string

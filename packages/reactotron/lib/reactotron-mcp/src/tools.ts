@@ -17,6 +17,8 @@ const headerFilterSchema = z.object({
   value: z.string().optional().describe("Optional header value substring to match"),
 })
 
+const MAX_QUERY_RESULTS = 500
+
 /** Extract width/height from PNG or JPEG buffer */
 function getImageSize(buf: Buffer, ext: string): { width: number; height: number } | null {
   try {
@@ -550,7 +552,7 @@ export function registerTools(
       subprefix: z.string().optional().describe("Optional subprefix, e.g. 'firstFrameRendered'"),
       keyword: z.string().optional().describe("Optional keyword substring to match anywhere in the log message"),
       excludeKeyword: z.string().optional().describe("Optional keyword substring to exclude anywhere in the log message"),
-      limit: z.number().int().min(1).max(100).optional().describe("Maximum number of results to return, default 20"),
+      limit: z.number().int().min(1).max(MAX_QUERY_RESULTS).optional().describe("Maximum number of results to return, default 20"),
       timeRange: timeRangeSchema.describe("Optional time range filter"),
       clientId: z.string().optional().describe("Optional app clientId filter"),
     },
@@ -605,7 +607,7 @@ export function registerTools(
       url: z.string().describe("Required URL substring to match, e.g. '/api/projects' or 'hugopia.yocdev.com'"),
       method: z.string().optional().describe("Optional HTTP method filter, e.g. 'GET' or 'POST'"),
       header: headerFilterSchema.optional().describe("Optional header filter"),
-      limit: z.number().int().min(1).max(100).optional().describe("Maximum number of results to return, default 20"),
+      limit: z.number().int().min(1).max(MAX_QUERY_RESULTS).optional().describe("Maximum number of results to return, default 20"),
       timeRange: timeRangeSchema.describe("Optional time range filter"),
       clientId: z.string().optional().describe("Optional app clientId filter"),
     },
@@ -669,7 +671,7 @@ export function registerTools(
     ].join(" "),
     inputSchema: {
       key: z.string().describe("Required storage key to match exactly"),
-      limit: z.number().int().min(1).max(100).optional().describe("Maximum number of results to return, default 20"),
+      limit: z.number().int().min(1).max(MAX_QUERY_RESULTS).optional().describe("Maximum number of results to return, default 20"),
       timeRange: timeRangeSchema.describe("Optional time range filter"),
       clientId: z.string().optional().describe("Optional app clientId filter"),
     },

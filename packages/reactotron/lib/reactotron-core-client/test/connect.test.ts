@@ -39,3 +39,22 @@ test("builds a socket", (done) => {
 
   expect(client.socket).toBeTruthy()
 })
+
+test("reconnects when the server starts after the client", (done) => {
+  let server: WebSocket.Server | null = null
+  const client = createClient({
+    createSocket,
+    port,
+    reconnectInterval: 50,
+    onConnect: () => {
+      client.close()
+      server?.close(() => done())
+    },
+  })
+
+  client.connect()
+
+  setTimeout(() => {
+    server = new WebSocket.Server({ port })
+  }, 100)
+})

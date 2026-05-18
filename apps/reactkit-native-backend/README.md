@@ -16,7 +16,7 @@ Environment variables:
 - `REACTOTRON_SERVER_PORT`, default `9091`
 - `REACTOTRON_NATIVE_API_PORT`, default `3901`
 - `REACTOTRON_MCP_PORT`, default `4567`
-- `REACTOTRON_BUFFER_LIMIT`, default `500`
+- `REACTOTRON_BUFFER_LIMIT`, default `2000`
 
 ## API
 

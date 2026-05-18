@@ -320,6 +320,71 @@ struct ConnectionItem: Codable, Identifiable, Hashable {
     var userAgent: String?
     var connected: Bool
     var lastSeenAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case clientId
+        case name
+        case platform
+        case platformVersion
+        case osRelease
+        case userAgent
+        case connected
+        case lastSeenAt
+    }
+
+    init(
+        id: Int,
+        clientId: String,
+        name: String,
+        platform: String,
+        platformVersion: String?,
+        osRelease: String?,
+        userAgent: String?,
+        connected: Bool,
+        lastSeenAt: String?
+    ) {
+        self.id = id
+        self.clientId = clientId
+        self.name = name
+        self.platform = platform
+        self.platformVersion = platformVersion
+        self.osRelease = osRelease
+        self.userAgent = userAgent
+        self.connected = connected
+        self.lastSeenAt = lastSeenAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        clientId = try container.decode(String.self, forKey: .clientId)
+        name = try container.decode(String.self, forKey: .name)
+        platform = try container.decode(String.self, forKey: .platform)
+        platformVersion = try container.decodeFlexibleStringIfPresent(forKey: .platformVersion)
+        osRelease = try container.decodeFlexibleStringIfPresent(forKey: .osRelease)
+        userAgent = try container.decodeFlexibleStringIfPresent(forKey: .userAgent)
+        connected = try container.decode(Bool.self, forKey: .connected)
+        lastSeenAt = try container.decodeFlexibleStringIfPresent(forKey: .lastSeenAt)
+    }
+}
+
+extension KeyedDecodingContainer {
+    func decodeFlexibleStringIfPresent(forKey key: Key) throws -> String? {
+        if try decodeNil(forKey: key) {
+            return nil
+        }
+        if let string = try? decode(String.self, forKey: key) {
+            return string
+        }
+        if let int = try? decode(Int.self, forKey: key) {
+            return String(int)
+        }
+        if let double = try? decode(Double.self, forKey: key) {
+            return String(double)
+        }
+        return nil
+    }
 }
 
 struct ConnectionsResponse: Codable {
@@ -344,6 +409,228 @@ struct LogsResponse: Codable {
     var logs: [LogEntry]
 }
 
+struct AndroidReverseState: Sendable {
+    var port: Int = 9091
+    var devices: [String] = []
+    var reversedDevices: [String] = []
+    var message: String = "Android reverse starting"
+    var isError: Bool = false
+}
+
+struct AndroidDevice: Sendable, Hashable {
+    var id: String
+    var state: String
+}
+
+final class AndroidReverseManager: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "reactkit.android-reverse")
+    private var trackProcess: Process?
+    private var port = 9091
+    private var reversedPortsByDevice: [String: Int] = [:]
+    private var onState: (@Sendable (AndroidReverseState) -> Void)?
+
+    func start(port: Int, onState: @escaping @Sendable (AndroidReverseState) -> Void) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.port = port
+            self.onState = onState
+            self.emit(message: "Looking for Android devices")
+            self.startTrackingDevices()
+            self.refreshDevices()
+        }
+    }
+
+    func update(port: Int) {
+        queue.async { [weak self] in
+            guard let self, self.port != port else { return }
+            self.port = port
+            self.reversedPortsByDevice.removeAll()
+            self.refreshDevices()
+        }
+    }
+
+    func stop() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.trackProcess?.terminate()
+            self.trackProcess = nil
+            self.onState = nil
+            self.reversedPortsByDevice.removeAll()
+        }
+    }
+
+    private func startTrackingDevices() {
+        if let trackProcess, trackProcess.isRunning {
+            return
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["adb", "track-devices"]
+
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+
+        outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            guard let manager = self else { return }
+            let output = String(data: handle.availableData, encoding: .utf8) ?? ""
+            guard !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            manager.queue.async { [weak manager] in
+                manager?.refreshDevices()
+            }
+        }
+
+        errorPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            guard let manager = self else { return }
+            let error = String(data: handle.availableData, encoding: .utf8) ?? ""
+            guard !error.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            manager.queue.async { [weak manager] in
+                manager?.emit(message: "adb device tracking failed: \(error.trimmingCharacters(in: .whitespacesAndNewlines))", isError: true)
+            }
+        }
+
+        process.terminationHandler = { [weak self] _ in
+            guard let manager = self else { return }
+            manager.queue.async { [weak manager] in
+                manager?.trackProcess = nil
+            }
+        }
+
+        do {
+            try process.run()
+            trackProcess = process
+        } catch {
+            emit(message: "adb not available: \(error.localizedDescription)", isError: true)
+        }
+    }
+
+    private func refreshDevices() {
+        let result = runADB(["devices"])
+        if result.exitCode != 0 {
+            emit(message: "adb devices failed: \(result.message)", isError: true)
+            return
+        }
+        handleDeviceListOutput(result.output)
+    }
+
+    private func handleDeviceListOutput(_ output: String) {
+        let allDevices = parseDevices(output)
+        let devices = allDevices.filter { $0.state == "device" }
+        let deviceIds = devices.map(\.id)
+        let activeDeviceSet = Set(deviceIds)
+
+        reversedPortsByDevice = reversedPortsByDevice.filter { activeDeviceSet.contains($0.key) }
+
+        guard !deviceIds.isEmpty else {
+            reversedPortsByDevice.removeAll()
+            let unavailableDevices = allDevices.filter { $0.state != "device" }
+            if !unavailableDevices.isEmpty {
+                let unavailableMessage = unavailableDevices
+                    .map { "\($0.id) \($0.state)" }
+                    .joined(separator: ", ")
+                emit(
+                    devices: unavailableDevices.map(\.id),
+                    reversedDevices: [],
+                    message: "Android device not ready: \(unavailableMessage)",
+                    isError: true
+                )
+                return
+            }
+            emit(devices: [], reversedDevices: [], message: "No Android device detected")
+            return
+        }
+
+        var failedMessages: [String] = []
+
+        for deviceId in deviceIds where reversedPortsByDevice[deviceId] != port {
+            let result = runADB(["-s", deviceId, "reverse", "tcp:\(port)", "tcp:\(port)"])
+            if result.exitCode == 0 {
+                reversedPortsByDevice[deviceId] = port
+            } else {
+                failedMessages.append("\(deviceId): \(result.message)")
+            }
+        }
+
+        let reversedDevices = deviceIds.filter { reversedPortsByDevice[$0] == port }
+        if !failedMessages.isEmpty {
+            emit(
+                devices: deviceIds,
+                reversedDevices: reversedDevices,
+                message: "Android reverse failed: \(failedMessages.joined(separator: "; "))",
+                isError: true
+            )
+            return
+        }
+
+        let label = reversedDevices.count == 1 ? reversedDevices[0] : "\(reversedDevices.count) devices"
+        emit(
+            devices: deviceIds,
+            reversedDevices: reversedDevices,
+            message: "Android reverse ready on \(label)"
+        )
+    }
+
+    private func parseDevices(_ output: String) -> [AndroidDevice] {
+        output
+            .components(separatedBy: .newlines)
+            .compactMap { line in
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty || trimmed.hasPrefix("List of devices") {
+                    return nil
+                }
+
+                let parts = trimmed.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+                guard parts.count >= 2 else { return nil }
+                return AndroidDevice(id: parts[0], state: parts[1])
+            }
+    }
+
+    private func runADB(_ arguments: [String]) -> (exitCode: Int32, output: String, message: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["adb"] + arguments
+
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return (1, "", error.localizedDescription)
+        }
+
+        let output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let error = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let message = [output, error]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+
+        return (process.terminationStatus, output, message)
+    }
+
+    private func emit(
+        devices: [String]? = nil,
+        reversedDevices: [String]? = nil,
+        message: String,
+        isError: Bool = false
+    ) {
+        let state = AndroidReverseState(
+            port: port,
+            devices: devices ?? Array(reversedPortsByDevice.keys).sorted(),
+            reversedDevices: reversedDevices ?? reversedPortsByDevice.keys.sorted(),
+            message: message,
+            isError: isError
+        )
+        onState?(state)
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var status: StatusResponse?
@@ -353,10 +640,12 @@ final class AppModel: ObservableObject {
     @Published var searchText = ""
     @Published var selectedSection: AppSection = .timeline
     @Published var isAutoRefreshPaused = false
+    @Published var androidReverse = AndroidReverseState()
     @Published var lastError: String?
 
     private let api = BackendAPI()
     private let supervisor = BackendSupervisor()
+    private let androidReverseManager = AndroidReverseManager()
     private var pollTask: Task<Void, Never>?
 
     var selectedConnection: ConnectionItem? {
@@ -365,6 +654,11 @@ final class AppModel: ObservableObject {
 
     func start() {
         supervisor.start()
+        androidReverseManager.start(port: androidReverse.port) { [weak self] state in
+            Task { @MainActor in
+                self?.androidReverse = state
+            }
+        }
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             guard let self else { return }
@@ -379,6 +673,7 @@ final class AppModel: ObservableObject {
 
     func stop() {
         pollTask?.cancel()
+        androidReverseManager.stop()
         supervisor.stop()
     }
 
@@ -404,6 +699,7 @@ final class AppModel: ObservableObject {
 
         self.status = status
         self.connections = connections
+        androidReverseManager.update(port: status.serverPort)
 
         if status.mcpStatus != "started" {
             try? await api.startMcp()
@@ -462,7 +758,7 @@ final class BackendAPI {
 
     func logs(clientId: String?, search: String) async throws -> LogsResponse {
         var components = URLComponents(url: baseURL.appending(path: "logs"), resolvingAgainstBaseURL: false)!
-        var queryItems: [URLQueryItem] = [URLQueryItem(name: "limit", value: "400")]
+        var queryItems: [URLQueryItem] = [URLQueryItem(name: "limit", value: "500")]
         if let clientId, !clientId.isEmpty {
             queryItems.append(URLQueryItem(name: "clientId", value: clientId))
         }
@@ -877,6 +1173,8 @@ struct ConnectionsPanel: View {
                     .frame(width: 10, height: 10)
             }
 
+            AndroidReverseCard(state: model.androidReverse)
+
             if model.connections.isEmpty {
                 EmptyConnectionCard()
             } else {
@@ -895,6 +1193,52 @@ struct ConnectionsPanel: View {
         .padding(24)
         .frame(maxHeight: .infinity)
         .softRoundedSurface(radius: 26, shadowRadius: 18, shadowY: 8)
+    }
+}
+
+struct AndroidReverseCard: View {
+    var state: AndroidReverseState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 9) {
+                Circle()
+                    .fill(indicatorColor)
+                    .frame(width: 8, height: 8)
+                Text("Android reverse")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DesignColor.primary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Text(":\(state.port)")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(DesignColor.secondary)
+                    .lineLimit(1)
+            }
+
+            Text(state.message)
+                .font(.system(size: 12))
+                .foregroundStyle(DesignColor.secondary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .background(backgroundColor)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var indicatorColor: Color {
+        if state.isError {
+            return DesignColor.accent
+        }
+        if !state.reversedDevices.isEmpty {
+            return DesignColor.success
+        }
+        return DesignColor.muted
+    }
+
+    private var backgroundColor: Color {
+        state.isError ? DesignColor.accentSoft.opacity(0.58) : DesignColor.surfaceSoft.opacity(0.62)
     }
 }
 
