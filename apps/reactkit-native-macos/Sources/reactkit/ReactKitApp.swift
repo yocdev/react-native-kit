@@ -741,7 +741,7 @@ final class AppModel: ObservableObject {
 
     private func loadSnapshot() async throws {
         let status = try await api.status()
-        let connections = try await api.connections().connections
+        let connections = try await api.connections().connections.filter(\.connected)
 
         self.status = status
         self.connections = connections
@@ -749,6 +749,12 @@ final class AppModel: ObservableObject {
 
         if status.mcpStatus != "started" {
             try? await api.startMcp()
+        }
+
+        guard !connections.isEmpty else {
+            selectedClientId = nil
+            logs = []
+            return
         }
 
         if selectedClientId == nil || !connections.contains(where: { $0.clientId == selectedClientId }) {
@@ -995,7 +1001,7 @@ struct HeaderView: View {
                 symbol: .activity,
                 color: statusColor(model.status?.serverStatus)
             )
-            .frame(width: 190)
+            .frame(width: 160)
 
             StatusPill(
                 title: mcpTitle,
@@ -1003,7 +1009,15 @@ struct HeaderView: View {
                 symbol: .network,
                 color: statusColor(model.status?.mcpStatus)
             )
-            .frame(width: 170)
+            .frame(width: 160)
+
+            StatusPill(
+                title: androidReverseTitle,
+                subtitle: androidReverseSubtitle,
+                symbol: .smartphone,
+                color: androidReverseColor
+            )
+            .frame(width: 160)
         }
         .padding(.horizontal, 16)
         .frame(height: 64)
@@ -1030,6 +1044,37 @@ struct HeaderView: View {
         case "stopped": "MCP stopped"
         default: "MCP starting"
         }
+    }
+
+    private var androidReverseTitle: String {
+        if model.androidReverse.isError {
+            return "ADB error"
+        }
+        if !model.androidReverse.reversedDevices.isEmpty {
+            return "ADB reverse"
+        }
+        return "ADB idle"
+    }
+
+    private var androidReverseSubtitle: String {
+        if model.androidReverse.isError {
+            return "ADB :\(model.androidReverse.port)"
+        }
+        let count = model.androidReverse.reversedDevices.count
+        if count > 0 {
+            return "ADB :\(model.androidReverse.port) · \(count)"
+        }
+        return "ADB :\(model.androidReverse.port)"
+    }
+
+    private var androidReverseColor: Color {
+        if model.androidReverse.isError {
+            return DesignColor.accent
+        }
+        if !model.androidReverse.reversedDevices.isEmpty {
+            return DesignColor.success
+        }
+        return DesignColor.muted
     }
 
     private func statusColor(_ status: String?) -> Color {
@@ -1060,28 +1105,28 @@ struct StatusPill: View {
     var color: Color
 
     var body: some View {
-        HStack(spacing: 8) {
-            LucideIcon(name: symbol, size: 24, color: color, strokeWidth: 2)
-                .frame(width: 32, height: 32)
+        HStack(spacing: 7) {
+            LucideIcon(name: symbol, size: 18, color: color, strokeWidth: 2)
+                .frame(width: 28, height: 28)
                 .background(color.opacity(0.12))
                 .clipShape(Circle())
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
                 Text(subtitle)
-                    .font(.system(size: 12))
+                    .font(.system(size: 11))
                     .foregroundStyle(DesignColor.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.leading, 8)
-        .padding(.trailing, 10)
-        .frame(height: 48)
+        .padding(.leading, 7)
+        .padding(.trailing, 9)
+        .frame(height: 42)
         .background(DesignColor.surface)
         .clipShape(Capsule())
         .overlay(Capsule().stroke(DesignColor.surface.opacity(0.96), lineWidth: 1))
@@ -1161,17 +1206,15 @@ struct ConnectionsPanel: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Connections")
                         .font(.system(size: 18, weight: .semibold))
-                    Text("\(model.status?.connectionCount ?? 0) active, \(model.status?.logCount ?? 0) events")
+                    Text(connectionSummary)
                         .font(.system(size: 13))
                         .foregroundStyle(DesignColor.secondary)
                 }
                 Spacer()
                 Circle()
-                    .fill((model.status?.connectionCount ?? 0) > 0 ? DesignColor.success : DesignColor.muted)
+                    .fill(model.connections.isEmpty ? DesignColor.muted : DesignColor.success)
                     .frame(width: 10, height: 10)
             }
-
-            AndroidReverseCard(state: model.androidReverse)
 
             if model.connections.isEmpty {
                 EmptyConnectionCard()
@@ -1191,6 +1234,13 @@ struct ConnectionsPanel: View {
         .padding(18)
         .frame(maxHeight: .infinity)
         .softRoundedSurface(radius: 20, shadowRadius: 18, shadowY: 8)
+    }
+
+    private var connectionSummary: String {
+        guard !model.connections.isEmpty else {
+            return "0 active"
+        }
+        return "\(model.connections.count) active, \(model.logs.count) visible events"
     }
 }
 

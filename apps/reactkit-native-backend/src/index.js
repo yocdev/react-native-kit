@@ -52,6 +52,12 @@ function normalizeConnection(connection, connected) {
     platform: connection.platform || previous.platform || "unknown",
     platformVersion: optionalString(connection.platformVersion ?? previous.platformVersion),
     osRelease: optionalString(connection.osRelease ?? previous.osRelease),
+    model: optionalString(connection.model ?? previous.model),
+    systemName: optionalString(connection.systemName ?? previous.systemName),
+    serial: optionalString(connection.serial ?? previous.serial),
+    screenWidth: optionalString(connection.screenWidth ?? previous.screenWidth),
+    screenHeight: optionalString(connection.screenHeight ?? previous.screenHeight),
+    screenScale: optionalString(connection.screenScale ?? previous.screenScale),
     userAgent: optionalString(connection.userAgent ?? previous.userAgent),
     address: optionalString(connection.address ?? previous.address),
     connected,
@@ -68,14 +74,36 @@ function normalizeTargetPart(value) {
   return String(value || "").trim().toLowerCase()
 }
 
+function normalizeStableIdentifier(value) {
+  const normalized = normalizeTargetPart(value)
+  return ["", "unknown", "null", "undefined", "n/a"].includes(normalized) ? "" : normalized
+}
+
 function connectionTargetKey(connection) {
+  const serial = normalizeStableIdentifier(connection.serial)
+  if (serial) {
+    return [
+      connection.name,
+      connection.platform,
+      serial,
+    ].map(normalizeTargetPart).join("|")
+  }
+
+  const dimensions = [
+    connection.screenWidth,
+    connection.screenHeight,
+  ].map(normalizeTargetPart).filter(Boolean).sort().join("x")
+
   return [
     connection.name,
     connection.platform,
     connection.platformVersion,
     connection.osRelease,
+    connection.model,
+    connection.systemName,
+    dimensions,
+    connection.screenScale,
     connection.userAgent,
-    connection.address,
   ].map(normalizeTargetPart).join("|")
 }
 
@@ -87,6 +115,8 @@ function connectionTime(connection) {
 function visibleConnections() {
   const deduped = new Map()
   for (const connection of state.connections.values()) {
+    if (!connection.connected) continue
+
     const key = connectionTargetKey(connection)
     const previous = deduped.get(key)
     if (!previous) {
@@ -104,7 +134,6 @@ function visibleConnections() {
   }
 
   return Array.from(deduped.values()).sort((left, right) => {
-    if (left.connected !== right.connected) return left.connected ? -1 : 1
     return connectionTime(right) - connectionTime(left)
   })
 }
@@ -490,17 +519,27 @@ function shutdown(apiServer) {
   apiServer.close(() => process.exit(0))
 }
 
-void startRuntimeServer()
-runtimeEnsureInterval = setInterval(() => {
-  if (state.serverStatus !== "started") {
-    void startRuntimeServer()
-  }
-}, 3000)
-void ensureMcpServer()
-mcpEnsureInterval = setInterval(() => {
+if (require.main === module) {
+  void startRuntimeServer()
+  runtimeEnsureInterval = setInterval(() => {
+    if (state.serverStatus !== "started") {
+      void startRuntimeServer()
+    }
+  }, 3000)
   void ensureMcpServer()
-}, 3000)
-const apiServer = startApiServer()
+  mcpEnsureInterval = setInterval(() => {
+    void ensureMcpServer()
+  }, 3000)
+  const apiServer = startApiServer()
 
-process.on("SIGINT", () => shutdown(apiServer))
-process.on("SIGTERM", () => shutdown(apiServer))
+  process.on("SIGINT", () => shutdown(apiServer))
+  process.on("SIGTERM", () => shutdown(apiServer))
+}
+
+module.exports = {
+  connectionTargetKey,
+  normalizeConnection,
+  upsertConnection,
+  visibleConnections,
+  state,
+}

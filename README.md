@@ -99,3 +99,30 @@ Useful tools exposed by the MCP server include:
 - `clear_timeline`: clear timeline events from the desktop app and MCP buffer.
 
 If Codex does not show the ReactNativeKit MCP tools after changing the MCP configuration, restart the Codex session so the tool list refreshes.
+
+## Codex skill usage
+
+Use the `rnkit` Codex skill when you want Codex to diagnose runtime evidence from the local ReactNativeKit desktop app. The skill queries the local API at `http://127.0.0.1:3901`, so ReactNativeKit must be running first.
+
+Example prompts:
+
+```txt
+Use $rnkit to inspect connected apps.
+```
+
+```txt
+Use $rnkit to find recent logs with prefix PreviewGateTiming and subprefix finalGatePass.
+```
+
+```txt
+Use $rnkit to inspect network responses whose URL contains aiv-vip-plans.
+```
+
+The skill workflow is:
+
+1. Check ReactNativeKit status.
+2. List connected apps when more than one app may be attached.
+3. Query the narrowest useful data: logs by prefix/subprefix/keyword, or network events by URL/method/header.
+4. Summarize evidence with timestamps and relevant values.
+
+Prefer the skill for agent-led debugging sessions. Prefer MCP when another MCP-aware tool needs direct access to the ReactNativeKit tool surface.
