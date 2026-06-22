@@ -242,6 +242,29 @@ describe("resources", () => {
     expect(timelineData.eventCount).toBeGreaterThanOrEqual(2)
   })
 
+  test("keeps only the 20 most recent disconnected apps", async () => {
+    for (let index = 0; index < 21; index += 1) {
+      const app = await connectMockApp(relayPort, `App${index}`)
+      await new Promise<void>((resolve) => {
+        app.once("close", () => resolve())
+        app.close()
+      })
+      await waitFor(() => relay.connections.length === 0)
+    }
+
+    const response = await mcpRequest(mcpPort, {
+      jsonrpc: "2.0",
+      method: "resources/read",
+      id: 43,
+      params: { uri: "reactotron://apps" },
+    })
+    const data = JSON.parse(parseSSE(response.body).result.contents[0].text)
+
+    expect(data.apps).toHaveLength(20)
+    expect(data.apps.map((app: any) => app.name)).not.toContain("App0")
+    expect(data.apps.map((app: any) => app.name)).toContain("App20")
+  }, 10000)
+
   test("reads timeline with buffered events", async () => {
     const app = await connectMockApp(relayPort)
     try {

@@ -39,9 +39,18 @@ export function createMcpServer(
   // Command buffer — collects recent commands for resource reads
   const commandBuffer: Command[] = []
   const BUFFER_SIZE = 500
+  const KNOWN_APPS_LIMIT = 20
   let commandListener: ((command: Command) => void) | null = null
   let connectionEstablishedListener: ((connection: any) => void) | null = null
   let disconnectListener: ((connection: any) => void) | null = null
+
+  function rememberApp(app: any) {
+    knownApps.delete(app.clientId)
+    knownApps.set(app.clientId, app)
+    while (knownApps.size > KNOWN_APPS_LIMIT) {
+      knownApps.delete(knownApps.keys().next().value!)
+    }
+  }
 
   function snapshotApps() {
     const liveApps = (reactotronServer.connections as any[]).map((connection) => ({
@@ -54,9 +63,7 @@ export function createMcpServer(
       lastSeenAt: new Date().toISOString(),
     }))
 
-    liveApps.forEach((app) => {
-      knownApps.set(app.clientId, app)
-    })
+    liveApps.forEach(rememberApp)
 
     console.log("[reactotron-mcp] snapshotApps", JSON.stringify({
       liveCount: liveApps.length,
@@ -77,13 +84,15 @@ export function createMcpServer(
   }
 
   function startBuffering() {
-    commandListener = (command: Command) => {
-      commandBuffer.push(command)
-      if (commandBuffer.length > BUFFER_SIZE) {
-        commandBuffer.shift()
+    if (!options.getCommands) {
+      commandListener = (command: Command) => {
+        commandBuffer.push(command)
+        if (commandBuffer.length > BUFFER_SIZE) {
+          commandBuffer.shift()
+        }
       }
+      reactotronServer.on("command", commandListener as any)
     }
-    reactotronServer.on("command", commandListener as any)
 
     connectionEstablishedListener = (connection: any) => {
       console.log("[reactotron-mcp] connectionEstablished", JSON.stringify({
@@ -91,7 +100,7 @@ export function createMcpServer(
         clientId: connection.clientId,
         platform: connection.platform,
       }))
-      knownApps.set(connection.clientId, {
+      rememberApp({
         id: connection.id,
         clientId: connection.clientId,
         name: connection.name,
@@ -110,7 +119,7 @@ export function createMcpServer(
         platform: connection.platform,
       }))
       const previous = knownApps.get(connection.clientId)
-      knownApps.set(connection.clientId, {
+      rememberApp({
         ...previous,
         id: connection.id,
         clientId: connection.clientId,

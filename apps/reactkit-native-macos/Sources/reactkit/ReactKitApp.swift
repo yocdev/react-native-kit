@@ -605,26 +605,41 @@ final class AndroidReverseManager: @unchecked Sendable {
         process.executableURL = adb.executableURL
         process.arguments = adb.arguments + arguments
 
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
+        let fileManager = FileManager.default
+        let outputURL = fileManager.temporaryDirectory.appending(path: UUID().uuidString)
+        let errorURL = fileManager.temporaryDirectory.appending(path: UUID().uuidString)
+        fileManager.createFile(atPath: outputURL.path, contents: nil)
+        fileManager.createFile(atPath: errorURL.path, contents: nil)
+        defer {
+            try? fileManager.removeItem(at: outputURL)
+            try? fileManager.removeItem(at: errorURL)
+        }
 
         do {
+            let outputFile = try FileHandle(forUpdating: outputURL)
+            let errorFile = try FileHandle(forUpdating: errorURL)
+            defer {
+                try? outputFile.close()
+                try? errorFile.close()
+            }
+            process.standardOutput = outputFile
+            process.standardError = errorFile
             try process.run()
             process.waitUntilExit()
+
+            try outputFile.seek(toOffset: 0)
+            try errorFile.seek(toOffset: 0)
+            let output = String(data: try outputFile.readToEnd() ?? Data(), encoding: .utf8) ?? ""
+            let error = String(data: try errorFile.readToEnd() ?? Data(), encoding: .utf8) ?? ""
+            let message = [output, error]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+
+            return (process.terminationStatus, output, message)
         } catch {
             return (1, "", error.localizedDescription)
         }
-
-        let output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let error = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let message = [output, error]
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-
-        return (process.terminationStatus, output, message)
     }
 
     private func resolveADB() -> (executableURL: URL, arguments: [String]) {
@@ -882,8 +897,8 @@ final class BackendSupervisor {
         process.arguments = runtime.arguments + [scriptURL.path]
         process.currentDirectoryURL = rootURL
         process.environment = ProcessInfo.processInfo.environment
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
 
         do {
             try process.run()

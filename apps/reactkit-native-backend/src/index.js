@@ -15,6 +15,7 @@ const config = {
   apiPort: readPort("REACTOTRON_NATIVE_API_PORT", 3901),
   mcpPort: readPort("REACTOTRON_MCP_PORT", 4567),
   bufferLimit: readPositiveInt("REACTOTRON_BUFFER_LIMIT", 2000),
+  bufferByteLimit: readPositiveInt("REACTOTRON_BUFFER_BYTE_LIMIT", 32 * 1024 * 1024),
 }
 
 const state = {
@@ -23,6 +24,7 @@ const state = {
   mcpStatus: "starting",
   connections: new Map(),
   commands: [],
+  commandBytes: 0,
   portUnavailable: null,
 }
 
@@ -139,6 +141,11 @@ function visibleConnections() {
 }
 
 function upsertConnection(connection, connected) {
+  if (!connected) {
+    state.connections.delete(connection.clientId)
+    return
+  }
+
   const normalized = normalizeConnection(connection, connected)
   const targetKey = connectionTargetKey(normalized)
 
@@ -241,6 +248,25 @@ function allCommands() {
   return state.commands.slice().sort((left, right) => left.messageId - right.messageId)
 }
 
+function commandSize(command) {
+  return Buffer.byteLength(JSON.stringify(command))
+}
+
+function replaceCommands(commands) {
+  state.commands = commands
+  state.commandBytes = commands.reduce((total, command) => total + commandSize(command), 0)
+}
+
+function appendCommand(command) {
+  const normalized = normalizeCommand(command)
+  state.commands.push(normalized)
+  state.commandBytes += commandSize(normalized)
+
+  while (state.commands.length > config.bufferLimit || state.commandBytes > config.bufferByteLimit) {
+    state.commandBytes -= commandSize(state.commands.shift())
+  }
+}
+
 function writeJson(res, statusCode, payload) {
   const body = JSON.stringify(payload)
   res.writeHead(statusCode, {
@@ -279,7 +305,9 @@ function statusPayload() {
     connectionCount: connections.filter((connection) => connection.connected).length,
     totalKnownConnections: connections.length,
     logCount: state.commands.length,
+    logBytes: state.commandBytes,
     bufferLimit: config.bufferLimit,
+    bufferByteLimit: config.bufferByteLimit,
     portUnavailable: state.portUnavailable,
   }
 }
@@ -328,9 +356,9 @@ async function requestHandler(req, res) {
     const clientId = payload.clientId || url.searchParams.get("clientId")
 
     if (clientId) {
-      state.commands = state.commands.filter((command) => command.clientId !== clientId)
+      replaceCommands(state.commands.filter((command) => command.clientId !== clientId))
     } else {
-      state.commands = []
+      replaceCommands([])
     }
 
     writeJson(res, 200, { ok: true, clearedClientId: clientId || null })
@@ -404,11 +432,7 @@ function startRuntimeServer() {
   })
 
   reactotronServer.on("command", (command) => {
-    const normalized = normalizeCommand(command)
-    state.commands.push(normalized)
-    if (state.commands.length > config.bufferLimit) {
-      state.commands.splice(0, state.commands.length - config.bufferLimit)
-    }
+    appendCommand(command)
   })
 
   runtimeStartPromise = new Promise((resolve) => {
@@ -435,9 +459,9 @@ function createRequiredMcpServer() {
   return createMcpServer(reactotronServer, {
     clearTimeline: (clientId) => {
       if (clientId) {
-        state.commands = state.commands.filter((command) => command.clientId !== clientId)
+        replaceCommands(state.commands.filter((command) => command.clientId !== clientId))
       } else {
-        state.commands = []
+        replaceCommands([])
       }
     },
     getCommands: allCommands,
@@ -537,6 +561,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  appendCommand,
+  config,
   connectionTargetKey,
   normalizeConnection,
   upsertConnection,

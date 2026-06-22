@@ -84,6 +84,7 @@ test("visibleConnections hides disconnected entries until they reconnect", () =>
   }, false)
 
   assert.deepEqual(visibleConnections(), [])
+  assert.equal(state.connections.size, 0)
 
   upsertConnection({
     id: 2,
