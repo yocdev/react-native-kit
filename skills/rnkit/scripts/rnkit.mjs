@@ -89,6 +89,9 @@ async function request(path, params) {
   try {
     response = await fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5000) })
   } catch (error) {
+    if (error.cause?.code === "EPERM") {
+      throw new Error(`ReactNativeKit loopback access is blocked at ${BASE_URL}. Retry with host permission. (${error.cause.code})`)
+    }
     throw new Error(`ReactNativeKit is unavailable at ${BASE_URL}. Start the desktop app and retry. (${error.message})`)
   }
 

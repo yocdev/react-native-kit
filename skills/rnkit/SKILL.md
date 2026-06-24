@@ -9,11 +9,11 @@ Use the bundled `scripts/rnkit.mjs` CLI. Do not call ReactNativeKit MCP tools an
 
 ## Workflow
 
-1. Run `node scripts/rnkit.mjs status` to confirm ReactNativeKit is running.
-2. Run `node scripts/rnkit.mjs connections` when multiple apps may be connected. Add `--client-id <id>` to subsequent queries when needed.
+1. Run `node "$HOME/.codex/skills/rnkit/scripts/rnkit.mjs" status` to confirm ReactNativeKit is running.
+2. Run `node "$HOME/.codex/skills/rnkit/scripts/rnkit.mjs" connections` when multiple apps may be connected. Add `--client-id <id>` to subsequent queries when needed.
 3. Query the narrowest useful data:
-   - Logs: `node scripts/rnkit.mjs logs --prefix <prefix> [filters]`
-   - Network: `node scripts/rnkit.mjs network --url <substring> [filters]`
+   - Logs: `node "$HOME/.codex/skills/rnkit/scripts/rnkit.mjs" logs --prefix <prefix> [filters]`
+   - Network: `node "$HOME/.codex/skills/rnkit/scripts/rnkit.mjs" network --url <substring> [filters]`
 4. Start with a small limit. Broaden only when the result does not answer the question.
 5. Summarize the evidence with timestamps and relevant values. State clearly when no matching event was captured.
 
@@ -36,9 +36,9 @@ Prefer `--prefix`; add any of:
 Examples:
 
 ```bash
-node scripts/rnkit.mjs logs --prefix PreviewGateTiming --subprefix finalGatePass --limit 20
-node scripts/rnkit.mjs logs --prefix JPush --keyword success --exclude-keyword Registration
-node scripts/rnkit.mjs logs --search "fatal" --start 2026-06-17T08:00:00Z --limit 50
+node "$HOME/.codex/skills/rnkit/scripts/rnkit.mjs" logs --prefix PreviewGateTiming --subprefix finalGatePass --limit 20
+node "$HOME/.codex/skills/rnkit/scripts/rnkit.mjs" logs --prefix JPush --keyword success --exclude-keyword Registration
+node "$HOME/.codex/skills/rnkit/scripts/rnkit.mjs" logs --search "fatal" --start 2026-06-17T08:00:00Z --limit 50
 ```
 
 ## Network filters
@@ -51,12 +51,12 @@ Require `--url <substring>`. Add any of:
 - `--full` to include request and response headers and bodies
 
 ```bash
-node scripts/rnkit.mjs network --url aiv-vip-plans --method GET --limit 10
+node "$HOME/.codex/skills/rnkit/scripts/rnkit.mjs" network --url aiv-vip-plans --method GET --limit 10
 ```
 
 ## Failures
 
 - If the script reports that ReactNativeKit is unavailable, ask the user to start the desktop app. Do not silently start it.
-- If a sandbox blocks `127.0.0.1` with `EPERM` or "Operation not permitted", rerun the same script command with the host permission required for loopback access. Do not switch to MCP.
+- If the script reports `loopback access is blocked`, rerun the same command with the host permission required for loopback access. Do not infer that ReactNativeKit is stopped and do not switch to MCP.
 - If multiple apps are connected, list connections and select the intended `clientId`.
 - If a query returns no matches, verify the prefix or URL and time range before broadening the query.
