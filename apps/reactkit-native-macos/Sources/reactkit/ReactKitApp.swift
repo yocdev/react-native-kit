@@ -460,6 +460,16 @@ final class AndroidReverseManager: @unchecked Sendable {
         }
     }
 
+    func restart() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.emit(message: "Restarting Android reverse")
+            self.reversedPortsByDevice.removeAll()
+            self.startTrackingDevices()
+            self.refreshDevices()
+        }
+    }
+
     func stop() {
         queue.async { [weak self] in
             guard let self else { return }
@@ -557,6 +567,11 @@ final class AndroidReverseManager: @unchecked Sendable {
         var failedMessages: [String] = []
 
         for deviceId in deviceIds where reversedPortsByDevice[deviceId] != port {
+            if hasReverse(deviceId: deviceId, port: port) {
+                reversedPortsByDevice[deviceId] = port
+                continue
+            }
+
             let result = runADB(["-s", deviceId, "reverse", "tcp:\(port)", "tcp:\(port)"])
             if result.exitCode == 0 {
                 reversedPortsByDevice[deviceId] = port
@@ -582,6 +597,14 @@ final class AndroidReverseManager: @unchecked Sendable {
             reversedDevices: reversedDevices,
             message: "Android reverse ready on \(label)"
         )
+    }
+
+    private func hasReverse(deviceId: String, port: Int) -> Bool {
+        let result = runADB(["-s", deviceId, "reverse", "--list"])
+        guard result.exitCode == 0 else { return false }
+        return result.output
+            .components(separatedBy: .newlines)
+            .contains { $0.contains("tcp:\(port) tcp:\(port)") }
     }
 
     private func parseDevices(_ output: String) -> [AndroidDevice] {
@@ -736,6 +759,10 @@ final class AppModel: ObservableObject {
         pollTask?.cancel()
         androidReverseManager.stop()
         supervisor.stop()
+    }
+
+    func restartAndroidReverse() {
+        androidReverseManager.restart()
     }
 
     func refresh() async {
@@ -1030,8 +1057,10 @@ struct HeaderView: View {
                 title: androidReverseTitle,
                 subtitle: androidReverseSubtitle,
                 symbol: .smartphone,
-                color: androidReverseColor
+                color: androidReverseColor,
+                action: model.restartAndroidReverse
             )
+            .help("Restart Android reverse")
             .frame(width: 160)
         }
         .padding(.horizontal, 16)
@@ -1089,7 +1118,7 @@ struct HeaderView: View {
         if !model.androidReverse.reversedDevices.isEmpty {
             return DesignColor.success
         }
-        return DesignColor.muted
+        return DesignColor.warning
     }
 
     private func statusColor(_ status: String?) -> Color {
@@ -1118,8 +1147,20 @@ struct StatusPill: View {
     var subtitle: String
     var symbol: LucideIcon.Name
     var color: Color
+    var action: (() -> Void)?
 
     var body: some View {
+        if let action {
+            Button(action: action) {
+                content
+            }
+            .buttonStyle(.plain)
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
         HStack(spacing: 7) {
             LucideIcon(name: symbol, size: 18, color: color, strokeWidth: 2)
                 .frame(width: 28, height: 28)
@@ -1145,6 +1186,7 @@ struct StatusPill: View {
         .background(DesignColor.surface)
         .clipShape(Capsule())
         .overlay(Capsule().stroke(DesignColor.surface.opacity(0.96), lineWidth: 1))
+        .contentShape(Capsule())
     }
 }
 
